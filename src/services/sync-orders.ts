@@ -154,7 +154,12 @@ const parseBlingDate = (value: string | undefined): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const allowedStatusSet = new Set(["1", "10", "atendido", "em andamento"]);
+const allowedStatusSet = new Set(
+  (env.BLING_ALLOWED_STATUS || "Atendido,Em andamento")
+    .split(",")
+    .map((status) => status.trim().toLowerCase())
+    .filter((status) => status.length > 0),
+);
 const isAllowedStatus = (value: string | number | undefined): boolean => {
   const normalized = normalizeStatus(value);
   return Boolean(normalized && allowedStatusSet.has(normalized));
@@ -211,16 +216,20 @@ export const syncBlingOrdersToTrelloWithOptions = async (
   );
   const requestedOrderIdSet = new Set(requestedOrderIds ?? []);
 
-  const orders: SyncCandidateOrder[] = hasRequestedOrderIds
+  const fetchedOrders: SyncCandidateOrder[] = hasRequestedOrderIds
     ? requestedOrderIds!.map((id) => ({ id }))
     : await fetchNewBlingOrders();
+  const deduplicatedOrderMap = new Map<string, SyncCandidateOrder>();
+  for (const order of fetchedOrders) {
+    deduplicatedOrderMap.set(order.id, order);
+  }
+  const orders = Array.from(deduplicatedOrderMap.values());
+
   const eligibleOrders = orders.filter((order) => {
     if (hasRequestedOrderIds) return true;
     const orderDate = parseBlingDate(order.data);
-    const statusAllowed = isAllowedStatus(order.situacao);
-
     const byDate = orderDate ? orderDate >= dateThreshold : true;
-    return byDate && statusAllowed;
+    return byDate;
   });
 
   const result: SyncResult = {

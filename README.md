@@ -77,7 +77,7 @@ socket.on("orders:card-created", () => {
 
 ## 6) Filtro de novos pedidos
 
-- `BLING_ALLOWED_STATUS`: processa apenas os status informados (case-insensitive)
+- `BLING_ALLOWED_STATUS`: processa apenas os status informados (case-insensitive). Padrao: `Atendido,Em andamento`
 - `BLING_MIN_ORDER_DATE`: define data minima fixa para processar pedidos
 - Sem `BLING_MIN_ORDER_DATE`, o sistema usa automaticamente o primeiro dia do mes atual
 - A coleta de pedidos no Bling e paginada (100 por pagina) para trazer todos os pedidos disponiveis no periodo
@@ -85,6 +85,55 @@ socket.on("orders:card-created", () => {
 ## 7) Renovacao automatica do token Bling
 
 Se `BLING_CLIENT_ID`, `BLING_CLIENT_SECRET` e `BLING_REFRESH_TOKEN` estiverem preenchidos, o backend tenta renovar o token automaticamente quando a API do Bling responder 401.
+
+### 7.1) Gerar novos tokens manualmente (quando precisar)
+
+Se ocorrer `invalid_grant` ou `invalid_client`, gere um novo `code` no OAuth e troque por novos tokens.
+
+1. Abra no navegador (troque os placeholders):
+
+```text
+https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=SEU_CLIENT_ID&redirect_uri=SUA_REDIRECT_URI_URL_ENCODED&state=abc123
+```
+
+2. Copie o `code` do callback e rode:
+
+#### Git Bash
+
+```bash
+CODE="SEU_CODE"
+CLIENT_ID="SEU_CLIENT_ID"
+CLIENT_SECRET="SEU_CLIENT_SECRET"
+REDIRECT_URI="https://seu-dominio.com/callback"
+
+curl -u "$CLIENT_ID:$CLIENT_SECRET" \
+  -X POST "https://api.bling.com.br/Api/v3/oauth/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=authorization_code" \
+  --data-urlencode "code=$CODE" \
+  --data-urlencode "redirect_uri=$REDIRECT_URI"
+```
+
+#### PowerShell
+
+```powershell
+$code = "SEU_CODE"
+$clientId = "SEU_CLIENT_ID"
+$clientSecret = "SEU_CLIENT_SECRET"
+$redirectUri = "https://seu-dominio.com/callback"
+
+curl.exe -u "$clientId`:$clientSecret" `
+  -X POST "https://api.bling.com.br/Api/v3/oauth/token" `
+  -H "Content-Type: application/x-www-form-urlencoded" `
+  --data-urlencode "grant_type=authorization_code" `
+  --data-urlencode "code=$code" `
+  --data-urlencode "redirect_uri=$redirectUri"
+```
+
+3. Atualize as envs com os retornos:
+
+- `BLING_ACCESS_TOKEN`
+- `BLING_REFRESH_TOKEN`
 
 ## 8) Atualizar cards antigos para novo padrao
 
