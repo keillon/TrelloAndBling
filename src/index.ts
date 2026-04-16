@@ -15,6 +15,8 @@ import {
 const app = express();
 app.use(express.json());
 let syncRunning = false;
+let authErrorPauseUntil = 0;
+const AUTH_ERROR_PAUSE_MS = 15 * 60 * 1000;
 
 const extractOrderIdsFromWebhook = (payload: unknown): string[] => {
   if (!payload || typeof payload !== "object") return [];
@@ -117,6 +119,10 @@ app.post("/backfill-cards", async (_req: Request, res: Response) => {
 });
 
 cron.schedule(env.SYNC_CRON, async () => {
+  if (Date.now() < authErrorPauseUntil) {
+    return;
+  }
+
   if (syncRunning) {
     console.log("[sync] skipped because previous sync is still running");
     return;
@@ -132,6 +138,16 @@ cron.schedule(env.SYNC_CRON, async () => {
       console.warn(`[sync] errors=${result.errors.length}`, result.errors);
     }
   } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("BLING_REFRESH_TOKEN_INVALID")
+    ) {
+      authErrorPauseUntil = Date.now() + AUTH_ERROR_PAUSE_MS;
+      console.error(
+        `[sync] paused for ${AUTH_ERROR_PAUSE_MS / 60000}m due to invalid Bling refresh token. Update Render env and redeploy.`,
+      );
+      return;
+    }
     console.error("[sync] fatal error", error);
   } finally {
     syncRunning = false;

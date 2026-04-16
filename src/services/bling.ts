@@ -36,8 +36,17 @@ type BlingRefreshResponse = {
   refresh_token?: string;
 };
 
+type BlingRefreshErrorResponse = {
+  error?: {
+    type?: string;
+    message?: string;
+    description?: string;
+  };
+};
+
 let currentAccessToken = env.BLING_ACCESS_TOKEN;
 let currentRefreshToken = env.BLING_REFRESH_TOKEN;
+let refreshTokenInvalid = false;
 const blingHttp = createRateLimitedRequester(env.BLING_MIN_INTERVAL_MS, {
   maxRetries: 4,
   baseDelayMs: 400,
@@ -80,6 +89,12 @@ const buildBasicAuthHeader = (
 };
 
 const refreshBlingAccessToken = async (): Promise<string | null> => {
+  if (refreshTokenInvalid) {
+    throw new Error(
+      "BLING_REFRESH_TOKEN_INVALID: update BLING_REFRESH_TOKEN/BLING_ACCESS_TOKEN in environment",
+    );
+  }
+
   if (
     !env.BLING_CLIENT_ID ||
     !env.BLING_CLIENT_SECRET ||
@@ -106,6 +121,21 @@ const refreshBlingAccessToken = async (): Promise<string | null> => {
 
   if (!response.ok) {
     const body = await response.text();
+    let parsedBody: BlingRefreshErrorResponse | null = null;
+    try {
+      parsedBody = JSON.parse(body) as BlingRefreshErrorResponse;
+    } catch {
+      parsedBody = null;
+    }
+    const errorType = parsedBody?.error?.type?.toLowerCase();
+
+    if (response.status === 400 && errorType === "invalid_grant") {
+      refreshTokenInvalid = true;
+      throw new Error(
+        "BLING_REFRESH_TOKEN_INVALID: invalid_grant returned by Bling OAuth",
+      );
+    }
+
     throw new Error(`Bling refresh token failed (${response.status}): ${body}`);
   }
 
@@ -169,6 +199,10 @@ export const fetchNewBlingOrders = async (): Promise<BlingOrder[]> => {
       const refreshedToken = await refreshBlingAccessToken();
       if (refreshedToken) {
         response = await fetchOrdersWithToken(refreshedToken, page, pageLimit);
+      } else {
+        throw new Error(
+          "BLING_UNAUTHORIZED: access token rejected and refresh credentials are not configured",
+        );
       }
     }
 
@@ -199,6 +233,10 @@ export const fetchBlingOrderDetails = async (
     const refreshedToken = await refreshBlingAccessToken();
     if (refreshedToken) {
       response = await fetchOrderDetailWithToken(orderId, refreshedToken);
+    } else {
+      throw new Error(
+        "BLING_UNAUTHORIZED: access token rejected and refresh credentials are not configured",
+      );
     }
   }
 
