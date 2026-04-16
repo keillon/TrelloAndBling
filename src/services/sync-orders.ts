@@ -34,9 +34,6 @@ type SyncCursorRow = {
 type SyncedCardRow = {
   bling_order_id: string;
   trello_card_id: string;
-  payload?: {
-    numero?: string;
-  };
 };
 
 const formatCurrencyBRL = (value: number | undefined): string => {
@@ -62,9 +59,14 @@ const normalizeStatus = (
   return String(value).trim().toLowerCase();
 };
 
-const getStatusLabel = (value: string | number | undefined): string => {
+const getStatusLabel = (
+  value: string | number | undefined,
+  statusId?: number,
+): string => {
+  if (statusId === 1) return "Atendido";
+  if (statusId === 10) return "Em andamento";
   const normalized = normalizeStatus(value);
-  if (!normalized) return "-";
+  if (!normalized) return "Sem status";
   // Bling status codes observed in this account:
   // 1 = Atendido, 10 = Em andamento
   if (normalized === "1") return "Atendido";
@@ -84,11 +86,12 @@ const cardNameFromOrder = (order: {
   id: string;
   numero?: string;
   situacao?: string | number;
+  situacaoId?: number;
   valorTotal?: number;
   clienteNome?: string;
 }): string => {
   const numberPart = order.numero ? `#${order.numero}` : `Bling ${order.id}`;
-  const statusPart = getStatusLabel(order.situacao);
+  const statusPart = getStatusLabel(order.situacao, order.situacaoId);
   const totalPart = formatCurrencyBRL(order.valorTotal);
   const clientPart = order.clienteNome ? ` | ${order.clienteNome}` : "";
   return `Pedido ${numberPart} | ${statusPart} | ${totalPart}${clientPart}`;
@@ -127,7 +130,7 @@ const cardDescriptionFromOrder = (order: {
     `- Cliente: ${order.clienteNome ?? "-"}`,
     "",
     "## Status e Totais",
-    `- Status (Bling): ${getStatusLabel(order.situacao)}`,
+    `- Status (Bling): ${getStatusLabel(order.situacao, order.situacaoId)}`,
     `- Codigo status (Bling): ${order.situacao ?? "-"}`,
     `- ID status (Bling): ${order.situacaoId ?? "-"}`,
     `- Total da venda: ${formatCurrencyBRL(order.valorTotal)}`,
@@ -237,12 +240,9 @@ export const syncBlingOrdersToTrelloWithOptions = async (
   }
   const orders = Array.from(deduplicatedOrderMap.values());
 
-  const eligibleOrders = orders.filter((order) => {
-    if (hasRequestedOrderIds) return true;
-    const orderDate = parseBlingDate(order.data);
-    const byDate = orderDate ? orderDate >= dateThreshold : false;
-    return byDate;
-  });
+  const eligibleOrders = orders.filter((order) =>
+    hasRequestedOrderIds ? true : Boolean(order.id),
+  );
 
   const result: SyncResult = {
     scanned: orders.length,
@@ -282,25 +282,6 @@ export const syncBlingOrdersToTrelloWithOptions = async (
       if (!isAllowedStatus(detailedOrder.situacao, detailedOrder.situacaoId)) {
         result.skipped += 1;
         continue;
-      }
-
-      if (detailedOrder.numero) {
-        const { data: existingRowsByNumber, error: existingByNumberError } =
-          await supabase
-            .from("order_syncs")
-            .select("bling_order_id, payload")
-            .eq("payload->>numero", detailedOrder.numero)
-            .limit(1);
-
-        if (existingByNumberError) {
-          throw existingByNumberError;
-        }
-
-        const existingByNumber = (existingRowsByNumber ?? []) as SyncedCardRow[];
-        if (existingByNumber.length > 0) {
-          result.skipped += 1;
-          continue;
-        }
       }
 
       const trelloCard = await createTrelloCard({
