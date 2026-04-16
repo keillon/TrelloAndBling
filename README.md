@@ -46,17 +46,41 @@ npm run dev
 
 - Health check: `GET http://localhost:3333/health`
 - Sync manual: `POST http://localhost:3333/sync-orders`
+- Webhook Bling: `POST http://localhost:3333/webhooks/bling/orders`
 
 ## 5) Sync automatico
 
 O cron e definido por `SYNC_CRON` (padrao: a cada 5 segundos com `*/5 * * * * *`).
 Se uma sync ainda estiver rodando, a proxima execucao e pulada para evitar sobreposicao.
 
+## 5.1) Atualizacao em tempo real (sem reload)
+
+O backend publica eventos via Socket.IO.
+
+- Endpoint Socket.IO: mesmo host/porta da API
+- Evento ao conectar: `orders:connected`
+- Evento de novo card: `orders:card-created`
+- Evento de fim de sync: `orders:sync-completed`
+- CORS configuravel por `SOCKET_CORS_ORIGIN` (separado por virgula para mais dominios)
+
+Exemplo no frontend:
+
+```ts
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:3333");
+socket.on("orders:card-created", () => {
+  // recarregue somente os cards/lista via API local
+  // sem recarregar a pagina inteira
+});
+```
+
 ## 6) Filtro de novos pedidos
 
 - `BLING_ALLOWED_STATUS`: processa apenas os status informados (case-insensitive)
 - `BLING_MIN_ORDER_DATE`: define data minima fixa para processar pedidos
-- Sem `BLING_MIN_ORDER_DATE`, o sistema usa `last_bling_sync_at` (com lookback) para focar em pedidos recentes
+- Sem `BLING_MIN_ORDER_DATE`, o sistema usa automaticamente o primeiro dia do mes atual
+- A coleta de pedidos no Bling e paginada (100 por pagina) para trazer todos os pedidos disponiveis no periodo
 
 ## 7) Renovacao automatica do token Bling
 
@@ -92,6 +116,7 @@ Este projeto esta pronto para deploy com o `Dockerfile` da raiz.
 - `TRELLO_MIN_INTERVAL_MS`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `SOCKET_CORS_ORIGIN` (ex.: `https://seu-frontend.com`)
 - `SYNC_CRON` (ex.: `*/5 * * * * *`)
 
 ### Passo a passo rapido (Railway/Render)

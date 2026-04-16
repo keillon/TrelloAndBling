@@ -24,6 +24,7 @@ const envSchema = z.object({
   TRELLO_MIN_INTERVAL_MS: z.coerce.number().int().min(0).default(120),
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  SOCKET_CORS_ORIGIN: z.string().optional(),
   SYNC_CRON: z.string().default("*/2 * * * *"),
 });
 

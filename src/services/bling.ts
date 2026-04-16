@@ -122,8 +122,16 @@ const refreshBlingAccessToken = async (): Promise<string | null> => {
   return currentAccessToken;
 };
 
-const fetchOrdersWithToken = async (token: string): Promise<Response> => {
-  const endpoint = `${env.BLING_API_BASE_URL}/pedidos/vendas`;
+const fetchOrdersWithToken = async (
+  token: string,
+  page: number,
+  limit: number,
+): Promise<Response> => {
+  const params = new URLSearchParams({
+    pagina: String(page),
+    limite: String(limit),
+  });
+  const endpoint = `${env.BLING_API_BASE_URL}/pedidos/vendas?${params.toString()}`;
   return blingHttp.request(endpoint, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -146,23 +154,40 @@ const fetchOrderDetailWithToken = async (
 };
 
 export const fetchNewBlingOrders = async (): Promise<BlingOrder[]> => {
-  let response = await fetchOrdersWithToken(currentAccessToken);
+  const allOrders: BlingApiOrder[] = [];
+  const pageLimit = 100;
+  let page = 1;
 
-  if (response.status === 401) {
-    const refreshedToken = await refreshBlingAccessToken();
-    if (refreshedToken) {
-      response = await fetchOrdersWithToken(refreshedToken);
+  while (true) {
+    let response = await fetchOrdersWithToken(
+      currentAccessToken,
+      page,
+      pageLimit,
+    );
+
+    if (response.status === 401) {
+      const refreshedToken = await refreshBlingAccessToken();
+      if (refreshedToken) {
+        response = await fetchOrdersWithToken(refreshedToken, page, pageLimit);
+      }
     }
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Bling request failed (${response.status}): ${body}`);
+    }
+
+    const data = (await response.json()) as BlingListResponse;
+    const orders = data.data ?? [];
+    allOrders.push(...orders);
+
+    if (orders.length < pageLimit) {
+      break;
+    }
+    page += 1;
   }
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Bling request failed (${response.status}): ${body}`);
-  }
-
-  const data = (await response.json()) as BlingListResponse;
-  const orders = data.data ?? [];
-  return orders.map(mapOrder);
+  return allOrders.map(mapOrder);
 };
 
 export const fetchBlingOrderDetails = async (

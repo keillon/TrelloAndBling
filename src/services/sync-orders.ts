@@ -11,6 +11,21 @@ type SyncResult = {
   errors: Array<{ orderId: string; message: string }>;
 };
 
+type SyncOptions = {
+  specificOrderIds?: string[];
+  onCardCreated?: (event: {
+    orderId: string;
+    trelloCardId: string;
+    trelloCardUrl: string;
+  }) => void;
+};
+
+type SyncCandidateOrder = {
+  id: string;
+  data?: string;
+  situacao?: string | number;
+};
+
 type SyncCursorRow = {
   key: string;
   value: string;
@@ -168,28 +183,39 @@ const saveLastSyncDate = async (date: Date): Promise<void> => {
   if (error) throw error;
 };
 
-const buildDateThreshold = (lastSync: Date | null): Date => {
+const buildDateThreshold = (_lastSync: Date | null): Date => {
   if (env.BLING_MIN_ORDER_DATE) {
     const fixedDate = parseBlingDate(env.BLING_MIN_ORDER_DATE);
     if (fixedDate) return fixedDate;
   }
 
-  if (lastSync) {
-    const lookback = new Date(lastSync.getTime());
-    lookback.setDate(lookback.getDate() - env.BLING_SYNC_LOOKBACK_DAYS);
-    return lookback;
-  }
-
-  const fallback = new Date();
-  fallback.setDate(fallback.getDate() - env.BLING_SYNC_LOOKBACK_DAYS);
-  return fallback;
+  // Default behavior: always process orders from the beginning of current month.
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  return monthStart;
 };
 
 export const syncBlingOrdersToTrello = async (): Promise<SyncResult> => {
+  return syncBlingOrdersToTrelloWithOptions();
+};
+
+export const syncBlingOrdersToTrelloWithOptions = async (
+  options?: SyncOptions,
+): Promise<SyncResult> => {
   const lastSyncAt = await loadLastSyncDate();
   const dateThreshold = buildDateThreshold(lastSyncAt);
-  const orders = await fetchNewBlingOrders();
+  const requestedOrderIds = options?.specificOrderIds;
+  const hasRequestedOrderIds = Boolean(
+    requestedOrderIds && requestedOrderIds.length > 0,
+  );
+  const requestedOrderIdSet = new Set(requestedOrderIds ?? []);
+
+  const orders: SyncCandidateOrder[] = hasRequestedOrderIds
+    ? requestedOrderIds!.map((id) => ({ id }))
+    : await fetchNewBlingOrders();
   const eligibleOrders = orders.filter((order) => {
+    if (hasRequestedOrderIds) return true;
     const orderDate = parseBlingDate(order.data);
     const statusAllowed = isAllowedStatus(order.situacao);
 
@@ -207,19 +233,21 @@ export const syncBlingOrdersToTrello = async (): Promise<SyncResult> => {
 
   for (const order of eligibleOrders) {
     try {
-      const { data: existing, error: existingError } = await supabase
-        .from("order_syncs")
-        .select("bling_order_id")
-        .eq("bling_order_id", order.id)
-        .maybeSingle();
+      if (!hasRequestedOrderIds || requestedOrderIdSet.has(order.id)) {
+        const { data: existing, error: existingError } = await supabase
+          .from("order_syncs")
+          .select("bling_order_id")
+          .eq("bling_order_id", order.id)
+          .maybeSingle();
 
-      if (existingError) {
-        throw existingError;
-      }
+        if (existingError) {
+          throw existingError;
+        }
 
-      if (existing) {
-        result.skipped += 1;
-        continue;
+        if (existing) {
+          result.skipped += 1;
+          continue;
+        }
       }
 
       const detailedOrder = await fetchBlingOrderDetails(order.id);
@@ -245,6 +273,11 @@ export const syncBlingOrdersToTrello = async (): Promise<SyncResult> => {
         throw insertError;
       }
 
+      options?.onCardCreated?.({
+        orderId: order.id,
+        trelloCardId: trelloCard.id,
+        trelloCardUrl: trelloCard.shortUrl,
+      });
       result.created += 1;
     } catch (error) {
       result.errors.push({
